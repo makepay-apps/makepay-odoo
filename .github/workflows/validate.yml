@@ -22,3 +22,32 @@ jobs:
 
       - name: Validate module
         run: python scripts/validate.py
+
+  odoo18:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: odoo
+          POSTGRES_PASSWORD: odoo-test
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U odoo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install and test in Odoo 18
+        run: |
+          docker run --rm --network host --entrypoint odoo \
+            -v "$GITHUB_WORKSPACE:/mnt/extra-addons:ro" \
+            odoo:18.0 \
+            --db_host=127.0.0.1 --db_user=odoo --db_password=odoo-test \
+            -d makepay_test -i makepay_odoo --test-enable --test-tags /makepay_odoo \
+            --stop-after-init --without-demo=all --http-interface=127.0.0.1 --log-level=test

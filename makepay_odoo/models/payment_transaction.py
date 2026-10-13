@@ -26,8 +26,8 @@ class PaymentTransaction(models.Model):
             "orderId": self.reference,
             "customerEmail": self.partner_email,
             "returnUrl": f"{base_url}{MakePayController._return_url}?reference={self.reference}",
-            "successUrl": f"{base_url}{MakePayController._return_url}?reference={self.reference}&status=paid",
-            "failureUrl": f"{base_url}{MakePayController._return_url}?reference={self.reference}&status=failed",
+            "successUrl": f"{base_url}{MakePayController._return_url}",
+            "failureUrl": f"{base_url}{MakePayController._return_url}",
             "metadata": {
                 "platform": "odoo",
                 "reference": self.reference,
@@ -110,7 +110,10 @@ class PaymentTransaction(models.Model):
     @staticmethod
     def _makepay_is_paid(notification_data):
         values = PaymentTransaction._makepay_status_values(notification_data)
-        return any(value == "paid" or "payment.paid" in value for value in values)
+        return bool(values & {
+            "paid", "complete", "payment.paid", "makepay.payment.paid",
+            "payment.complete", "makepay.payment.complete",
+        })
 
     @staticmethod
     def _makepay_is_failed(notification_data):

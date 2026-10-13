@@ -1,6 +1,6 @@
 {
     "name": "MakePay Payment Provider",
-    "version": "18.0.1.0.0",
+    "version": "18.0.1.0.1",
     "category": "Accounting/Payment Providers",
     "summary": "Accept MakePay hosted payment links in Odoo.",
     "author": "MakePay",
