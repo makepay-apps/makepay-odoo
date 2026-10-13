@@ -23,8 +23,17 @@ jobs:
       - name: Validate module
         run: python scripts/validate.py
 
-  odoo18:
+  odoo:
+    name: odoo (${{ matrix.version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '18.0'
+            without_demo: all
+          - version: '19.0'
+            without_demo: 'True'
     services:
       postgres:
         image: postgres:16-alpine
@@ -43,11 +52,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Install and test in Odoo 18
+      - name: Install and test in Odoo ${{ matrix.version }}
         run: |
           docker run --rm --network host --entrypoint odoo \
             -v "$GITHUB_WORKSPACE:/mnt/extra-addons:ro" \
-            odoo:18.0 \
+            odoo:${{ matrix.version }} \
             --db_host=127.0.0.1 --db_user=odoo --db_password=odoo-test \
             -d makepay_test -i makepay_odoo --test-enable --test-tags /makepay_odoo \
-            --stop-after-init --without-demo=all --http-interface=127.0.0.1 --log-level=test
+            --stop-after-init --without-demo=${{ matrix.without_demo }} \
+            --http-interface=127.0.0.1 --log-level=test

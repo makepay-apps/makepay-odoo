@@ -37,8 +37,8 @@ class MakePayController(http.Controller):
             return request.make_json_response({"error": "invalid payload"}, status=400)
 
         try:
-            tx_sudo = request.env["payment.transaction"].sudo()._get_tx_from_notification_data(
-                "makepay", payload,
+            tx_sudo = request.env["payment.transaction"].sudo()._makepay_get_tx_from_payment_data(
+                payload,
             )
         except ValidationError:
             return request.make_json_response({"error": "missing payment link UID"}, status=400)
@@ -52,7 +52,7 @@ class MakePayController(http.Controller):
             _logger.warning("MakePay webhook rejected because signature verification failed.")
             return request.make_json_response({"error": "invalid signature"}, status=401)
 
-        tx_sudo._process_notification_data(payload)
+        tx_sudo._makepay_process_payment_data(payload)
         return request.make_json_response({"ok": True, "reconciled": True})
 
     @staticmethod

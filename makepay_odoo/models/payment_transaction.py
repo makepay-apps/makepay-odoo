@@ -35,17 +35,17 @@ class PaymentTransaction(models.Model):
             },
         }
         payment_link = self.provider_id._makepay_create_payment_link(payload)
-        uid = payment_link.get("uid") or payment_link.get("id")
+        link_uid = payment_link.get("uid") or payment_link.get("id")
         redirect_url = payment_link.get("checkoutUrl") or payment_link.get("publicUrl")
 
-        if not uid or not redirect_url:
+        if not link_uid or not redirect_url:
             raise ValidationError(_("MakePay did not return a payment link URL."))
 
         self.write(
             {
-                "makepay_payment_link_uid": uid,
+                "makepay_payment_link_uid": link_uid,
                 "makepay_payment_url": redirect_url,
-                "provider_reference": uid,
+                "provider_reference": link_uid,
             }
         )
 
@@ -58,33 +58,71 @@ class PaymentTransaction(models.Model):
         return rendering_values
 
     def _get_tx_from_notification_data(self, provider_code, notification_data):
-        tx = super()._get_tx_from_notification_data(provider_code, notification_data)
-        if provider_code != "makepay" or tx:
-            return tx
+        """Odoo 18 notification lookup hook."""
+        if provider_code != "makepay":
+            return super()._get_tx_from_notification_data(provider_code, notification_data)
+        return self._makepay_find_transaction(notification_data)
 
-        uid = self._makepay_payment_link_uid(notification_data)
-        if not uid:
+    def _search_by_reference(self, provider_code, payment_data):
+        """Odoo 19 lookup hook: MakePay identifies payments by the hosted link UID."""
+        if provider_code != "makepay":
+            return super()._search_by_reference(provider_code, payment_data)
+        return self._makepay_find_transaction(payment_data)
+
+    def _makepay_get_tx_from_payment_data(self, payment_data):
+        if hasattr(self, "_process"):
+            return self._search_by_reference("makepay", payment_data)
+        return self._get_tx_from_notification_data("makepay", payment_data)
+
+    def _makepay_process_payment_data(self, payment_data):
+        """Use the installed Odoo version's payment processing entry point."""
+        self.ensure_one()
+        if hasattr(self, "_process"):
+            return self._process("makepay", payment_data)
+        return self._handle_notification_data("makepay", payment_data)
+
+    def _makepay_find_transaction(self, payment_data):
+        link_uid = self._makepay_payment_link_uid(payment_data)
+        if not link_uid:
             raise ValidationError(_("MakePay notification did not include a payment link UID."))
 
         return self.search(
             [
                 ("provider_code", "=", "makepay"),
                 "|",
-                ("makepay_payment_link_uid", "=", uid),
-                ("provider_reference", "=", uid),
+                ("makepay_payment_link_uid", "=", link_uid),
+                ("provider_reference", "=", link_uid),
             ],
             limit=1,
         )
 
     def _process_notification_data(self, notification_data):
-        super()._process_notification_data(notification_data)
+        """Odoo 18 payment update hook."""
         if self.provider_code != "makepay":
-            return
+            return super()._process_notification_data(notification_data)
+        self._makepay_apply_payment_data(notification_data)
 
-        uid = self._makepay_payment_link_uid(notification_data)
-        if uid and not self.makepay_payment_link_uid:
-            self.makepay_payment_link_uid = uid
-            self.provider_reference = uid
+    def _extract_amount_data(self, payment_data):
+        """Odoo 19 amount validation hook."""
+        if self.provider_code != "makepay":
+            return super()._extract_amount_data(payment_data)
+        # Lifecycle events do not guarantee an amount in the Odoo transaction's currency.
+        # Reconcile the signed status of the link created for this transaction instead.
+        return None
+
+    def _apply_updates(self, payment_data):
+        """Odoo 19 payment update hook."""
+        if self.provider_code != "makepay":
+            return super()._apply_updates(payment_data)
+        self._makepay_apply_payment_data(payment_data)
+
+    def _makepay_apply_payment_data(self, notification_data):
+        self.ensure_one()
+
+        link_uid = self._makepay_payment_link_uid(notification_data)
+        if link_uid and not self.makepay_payment_link_uid:
+            self.makepay_payment_link_uid = link_uid
+            self.provider_reference = link_uid
 
         if self._makepay_is_paid(notification_data):
             self._set_done()
