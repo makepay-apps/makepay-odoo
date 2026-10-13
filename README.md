@@ -6,8 +6,8 @@ The module adds a MakePay provider, creates hosted payment links for Odoo transa
 
 ## Target Versions
 
-- Odoo 18 and 19 payment provider APIs
-- Odoo 17 may work with minor view or method adjustments
+- Odoo 18 payment provider API
+- Odoo 19 is not supported by this release; its payment notification hooks differ.
 
 ## Configuration
 
@@ -34,4 +34,6 @@ The validator compiles Python files, checks XML data files, verifies required mo
 
 ## Production Notes
 
-Run this module in an Odoo development database before production use. The provider hooks follow Odoo's standard payment provider extension points, but each Odoo major version can make small view or provider-field changes.
+Upgrade installed modules to **18.0.1.0.1**. Browser return URLs only redirect to Odoo's payment status page; signed MakePay webhooks are required to confirm payments. Configure the webhook URL and secret on both sides before accepting payments. A customer may see a pending status until the webhook arrives.
+
+Run this module in an Odoo development database before production use. The provider hooks follow Odoo 18's payment provider extension points.
