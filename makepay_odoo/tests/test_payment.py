@@ -4,6 +4,8 @@ import time
 from hashlib import sha256
 from unittest.mock import patch
 
+from odoo import release
+from odoo.exceptions import ValidationError
 from odoo.tests import tagged
 from odoo.addons.payment.tests.http_common import PaymentHttpCommon
 
@@ -160,3 +162,70 @@ class TestMakePayPayment(PaymentHttpCommon):
         self.assertEqual(self.tx.makepay_payment_link_uid, "checkout-link")
         self.assertEqual(self.tx.provider_reference, "checkout-link")
         self.assertEqual(self.tx.state, "pending")
+
+    def test_manifest_version_matches_installed_odoo_series(self):
+        module = self.env["ir.module.module"].search([("name", "=", "makepay_odoo")])
+        self.assertEqual(module.latest_version, f"{release.major_version}.1.1.0")
+
+    def test_signed_webhooks_match_supported_link_identifiers(self):
+        for identity in (
+            {"paymentLink": {"id": "test-link-uid"}},
+            {"data": {"paymentLinkUid": "test-link-uid"}},
+            {"data": {"uid": "test-link-uid"}},
+            {"reference": "test-link-uid"},
+        ):
+            with self.subTest(identity=identity):
+                self.tx.state = "pending"
+                payload = {"session": {"status": "complete"}, **identity}
+                response = self._post_webhook(payload)
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json(), {"ok": True, "reconciled": True})
+                self.tx.invalidate_recordset()
+                self.assertEqual(self.tx.state, "done")
+
+    def test_signed_webhook_matches_existing_provider_reference(self):
+        self.tx.makepay_payment_link_uid = False
+        response = self._post_webhook(self._payload())
+        self.assertEqual(response.status_code, 200)
+        self.tx.invalidate_recordset()
+        self.assertEqual(self.tx.state, "done")
+        self.assertEqual(self.tx.makepay_payment_link_uid, "test-link-uid")
+
+    def test_native_payment_pipeline_reconciles_by_link_uid(self):
+        transactions = self.env["payment.transaction"]
+        payload = self._payload()
+        if hasattr(transactions, "_process"):
+            tx = transactions._process("makepay", payload)
+        else:
+            tx = transactions._handle_notification_data("makepay", payload)
+        self.assertEqual(tx, self.tx)
+        self.assertEqual(tx.state, "done")
+
+    def test_other_provider_lookup_uses_native_behavior(self):
+        transactions = self.env["payment.transaction"]
+        payload = {"reference": self.tx.reference}
+        if hasattr(transactions, "_process"):
+            # The same reference with another provider must not match MakePay.
+            self.assertFalse(transactions._search_by_reference("none", payload))
+        else:
+            self.assertFalse(transactions._get_tx_from_notification_data("none", payload))
+
+    def test_crypto_settlement_amount_does_not_replace_order_amount(self):
+        payload = self._payload()
+        payload["paymentLink"].update({"amount": "0.0001", "currency": "BTC"})
+        payload["session"].update({"invoiceAmount": "0.0001", "invoiceAsset": "BTC"})
+        response = self._post_webhook(payload)
+        self.assertEqual(response.status_code, 200)
+        self.tx.invalidate_recordset()
+        self.assertEqual(self.tx.state, "done")
+        self.assertEqual(self.tx.amount, self.amount)
+        self.assertEqual(self.tx.currency_id, self.currency)
+
+    def test_checkout_rejects_incomplete_payment_link_response(self):
+        for response in ({"uid": "checkout-link"}, {"checkoutUrl": "https://www.makepay.io"}):
+            with self.subTest(response=response):
+                with patch.object(type(self.provider), "_makepay_create_payment_link", return_value=response):
+                    with self.assertRaises(ValidationError):
+                        self.tx._get_processing_values()
+                self.assertEqual(self.tx.makepay_payment_link_uid, "test-link-uid")
+                self.assertEqual(self.tx.state, "pending")
